@@ -2,20 +2,23 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import joblib
 
-# Page setup
-st.set_page_config(page_title="Interactive IMDb Movie Analytics and Popularity Insights Dashboard", layout="wide")
+st.set_page_config(page_title="IMDb Movie Analytics Dashboard", layout="wide")
 
-st.title("🎬 Interactive IMDb Movie Analytics and Popularity Insights Dashboard")
+st.title("🎬 IMDb Interactive Movie Analytics Dashboard")
 
-# Load dataset with caching
 @st.cache_data
 def load_data():
     return pd.read_csv("data/processed/imdb_cleaned.csv")
 
 df = load_data()
 
-# Sidebar filters
+# Load ML model
+model = joblib.load("model.pkl")
+model_columns = joblib.load("model_columns.pkl")
+
+# Sidebar Filters
 st.sidebar.header("Filters")
 
 genres = sorted(set(g for sub in df["Genres"].str.split(",") for g in sub))
@@ -44,7 +47,6 @@ rating_filter = st.sidebar.slider(
     7.0
 )
 
-# Apply filters
 filtered = df.copy()
 
 if genre_filter != "All":
@@ -59,7 +61,6 @@ filtered = filtered[
     (filtered["Rating"] >= rating_filter)
 ]
 
-# Download filtered dataset
 st.sidebar.download_button(
     label="Download Filtered Data",
     data=filtered.to_csv(index=False),
@@ -68,18 +69,17 @@ st.sidebar.download_button(
 )
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Overview",
     "Popularity Analysis",
     "Genre Analysis",
     "Movie Explorer",
-    "Recommendations",
-    "Hidden Gems"
+    "Rating Prediction"
 ])
 
-# -------------------------
-# TAB 1: Overview
-# -------------------------
+# -----------------------------
+# TAB 1 Overview
+# -----------------------------
 with tab1:
 
     st.subheader("📊 Key Metrics")
@@ -93,18 +93,13 @@ with tab1:
 
     st.subheader("⭐ Rating Distribution")
 
-    fig = px.histogram(
-        filtered,
-        x="Rating",
-        nbins=20,
-        color_discrete_sequence=["#ff4b4b"]
-    )
+    fig = px.histogram(filtered, x="Rating", nbins=20)
 
     st.plotly_chart(fig, use_container_width=True)
 
-# -------------------------
-# TAB 2: Popularity Analysis
-# -------------------------
+# -----------------------------
+# TAB 2 Popularity
+# -----------------------------
 with tab2:
 
     st.subheader("🔥 Popularity vs Rating")
@@ -131,9 +126,9 @@ with tab2:
         use_container_width=True
     )
 
-# -------------------------
-# TAB 3: Genre Analysis
-# -------------------------
+# -----------------------------
+# TAB 3 Genre Analysis
+# -----------------------------
 with tab3:
 
     st.subheader("🎭 Top Genres")
@@ -155,9 +150,9 @@ with tab3:
 
     st.plotly_chart(fig3, use_container_width=True)
 
-# -------------------------
-# TAB 4: Movie Explorer
-# -------------------------
+# -----------------------------
+# TAB 4 Movie Explorer
+# -----------------------------
 with tab4:
 
     st.subheader("🔍 Search Movie or Series")
@@ -178,52 +173,52 @@ with tab4:
         else:
             st.warning("No titles found.")
 
-# -------------------------
-# TAB 5: Recommendations
-# -------------------------
+# -----------------------------
+# TAB 5 Prediction
+# -----------------------------
 with tab5:
 
-    st.subheader("🎯 Better Than Your Favorite")
+    st.subheader("🎯 Predict IMDb Rating")
 
-    fav = st.text_input("Enter your favorite movie")
-
-    if fav:
-
-        pref = df[df["Title"].str.contains(fav, case=False)]
-
-        if not pref.empty:
-
-            genre = pref.iloc[0]["Genres"].split(",")[0]
-            rating = pref.iloc[0]["Rating"]
-
-            better = df[
-                (df["Genres"].str.contains(genre)) &
-                (df["Rating"] > rating)
-            ].sort_values(by="Rating", ascending=False).head(10)
-
-            st.write(f"Better titles in **{genre}** genre")
-
-            st.dataframe(
-                better[["Title", "Year", "Rating", "Votes"]],
-                use_container_width=True
-            )
-
-        else:
-            st.warning("Movie not found.")
-
-# -------------------------
-# TAB 6: Hidden Gems
-# -------------------------
-with tab6:
-
-    st.subheader("💎 Hidden Gems")
-
-    gems = filtered[
-        (filtered["Rating"] > 8) &
-        (filtered["Votes"] < filtered["Votes"].median())
-    ].sort_values(by="Rating", ascending=False).head(10)
-
-    st.dataframe(
-        gems[["Title", "Year", "Rating", "Votes"]],
-        use_container_width=True
+    year = st.slider(
+        "Release Year",
+        int(df["Year"].min()),
+        int(df["Year"].max()),
+        2022
     )
+
+    votes = st.number_input(
+        "Number of Votes",
+        min_value=1000,
+        max_value=10000000,
+        value=50000
+    )
+
+    genre = st.selectbox(
+        "Genre",
+        genres
+    )
+
+    content_type = st.selectbox(
+        "Content Type",
+        ["movie", "tvSeries"]
+    )
+
+    input_df = pd.DataFrame({
+        "Year": [year],
+        "Votes": [votes],
+        "Genres": [genre],
+        "Type": [content_type]
+    })
+
+    input_encoded = pd.get_dummies(input_df)
+
+    for col in model_columns:
+        if col not in input_encoded.columns:
+            input_encoded[col] = 0
+
+    input_encoded = input_encoded[model_columns]
+
+    prediction = model.predict(input_encoded)[0]
+
+    st.success(f"Predicted IMDb Rating: **{round(prediction,2)}**")
